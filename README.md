@@ -1,0 +1,60 @@
+# Shop the Frame (UofT Hacks)
+
+Shop the Frame is a Chrome extension + Express backend that lets you capture a YouTube video frame, detect items in the scene with Gemini, and return Shopify product matches.
+
+## Features
+- One-click capture from a YouTube watch page
+- Gemini-powered item detection + query generation
+- Shopify catalog search (real API or mock fallback)
+- Clean side panel UI with detected items and product cards
+
+## Project Structure
+- `backend/` Express API for image upload + Gemini + Shopify search
+- `extension/` Chrome extension (content + background scripts)
+- `Shop the Frame UI Design/` Vite-based UI exploration (optional)
+
+## Quickstart
+### 1) Backend
+```bash
+cd backend
+npm install
+```
+
+Create `backend/.env`:
+```bash
+GEMINI_API_KEY=your_gemini_api_key
+# Optional: use real Shopify catalog search
+SHOPIFY_CLIENT_ID=your_shopify_client_id
+SHOPIFY_CLIENT_SECRET=your_shopify_client_secret
+# Optional: force mock responses
+# SHOPIFY_USE_MOCK=true
+PORT=3000
+```
+
+Run the server:
+```bash
+npm run dev
+```
+
+### 2) Chrome extension
+1. Open Chrome -> `chrome://extensions`
+2. Enable **Developer mode**
+3. Click **Load unpacked** and select the `extension/` folder
+4. Open any YouTube watch page, click **Shop this frame**
+
+The extension calls `http://localhost:3000/shop-frame` and expects the backend to be running.
+
+## API
+- `POST /health` -> `{ ok: true }`
+- `POST /shop-frame` -> `multipart/form-data` with `image` field
+
+## Notes
+- Image upload limit is 10MB.
+- Shopify search defaults to mock data if credentials are missing.
+- The UI design folder is a standalone Vite app for visual exploration.
+
+## Tech
+- Node.js, Express, Multer
+- Gemini (Google Generative AI)
+- Chrome Extension (MV3)
+- Shopify Catalog API (optional)
