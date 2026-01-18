@@ -31,13 +31,18 @@
     spinner: `<svg class="spinner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <path d="M21 12a9 9 0 11-6.219-8.56"/>
     </svg>`,
-    externalLink: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-      <polyline points="15 3 21 3 21 9"/>
-      <line x1="10" y1="14" x2="21" y2="3"/>
+    externalLink: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7 17l10-10"/>
+      <path d="M10 7h7v7"/>
     </svg>`,
     chevronDown: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <polyline points="6 9 12 15 18 9"/>
+    </svg>`,
+    storefront: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 10h18"/>
+      <path d="M5 10l1-5h12l1 5"/>
+      <path d="M6 10v9h12v-9"/>
+      <path d="M10 19v-5h4v5"/>
     </svg>`,
     shopifyBolt: `<svg viewBox="0 0 20 20" fill="white">
       <path d="M12.4 3.5L11.5 8.5H15.5L8.5 16.5L9.5 11.5H5.5L12.4 3.5Z"/>
@@ -169,24 +174,28 @@
   // Render a single product card
   function renderProductCard(product) {
     const priceDisplay = formatPrice(product);
-    const imageUrl = product.image || 'https://via.placeholder.com/80x80?text=Product';
-    const productUrl = product.url || '#';
+    const imageUrl = getProductImage(product);
+    const productUrl = getProductUrl(product);
+    const merchantName = getMerchantName(product);
 
     return `
       <div class="product-card" data-url="${escapeHtml(productUrl)}">
         <div class="product-card-inner">
           <div class="product-image">
             <img src="${escapeHtml(imageUrl)}"
-                 alt="${escapeHtml(product.title)}"
+                 alt="${escapeHtml(product.title || 'Product image')}"
                  onerror="this.src='https://via.placeholder.com/80x80?text=Product'"/>
           </div>
           <div class="product-info">
-            <h4 class="product-title">${escapeHtml(product.title)}</h4>
-            <div class="shopify-badge">
-              <div class="shopify-badge-icon">
-                ${icons.shopifyBolt}
+            <h4 class="product-title">${escapeHtml(product.title || 'Untitled product')}</h4>
+            <div class="product-meta">
+              <div class="shopify-badge">
+                <div class="shopify-badge-icon">
+                  ${icons.shopifyBolt}
+                </div>
+                <span>Shopify</span>
               </div>
-              <span>Shopify</span>
+              ${merchantName ? `<div class="merchant-name">${icons.storefront}<span>${escapeHtml(merchantName)}</span></div>` : ''}
             </div>
             <div class="product-footer">
               <span class="product-price">${priceDisplay}</span>
@@ -484,14 +493,68 @@
   function formatPrice(product) {
     if (product.priceMin !== undefined && product.priceMax !== undefined) {
       if (product.priceMin === product.priceMax) {
-        return `$${product.priceMin}`;
+        return formatCurrency(product.priceMin, product.currency || 'USD');
       }
-      return `$${product.priceMin} – $${product.priceMax}`;
+      return `${formatCurrency(product.priceMin, product.currency || 'USD')} - ${formatCurrency(product.priceMax, product.currency || 'USD')}`;
     }
     if (product.price !== undefined) {
-      return `$${product.price}`;
+      return formatCurrency(product.price, product.currency || 'USD');
+    }
+    if (product.priceRange) {
+      const minAmount = normalizeAmount(product.priceRange.min?.amount);
+      const maxAmount = normalizeAmount(product.priceRange.max?.amount);
+      const currency = product.priceRange.min?.currency || product.priceRange.max?.currency || 'USD';
+      if (minAmount !== null && maxAmount !== null) {
+        if (minAmount === maxAmount) {
+          return formatCurrency(minAmount, currency);
+        }
+        return `${formatCurrency(minAmount, currency)} - ${formatCurrency(maxAmount, currency)}`;
+      }
     }
     return 'Price unavailable';
+  }
+
+  function normalizeAmount(amount) {
+    if (amount === null || amount === undefined) return null;
+    const value = typeof amount === 'string' ? Number.parseFloat(amount) : amount;
+    if (!Number.isFinite(value)) return null;
+    if (Number.isInteger(value) && Math.abs(value) >= 1000) {
+      return value / 100;
+    }
+    return value;
+  }
+
+  function formatCurrency(amount, currency) {
+    const normalized = normalizeAmount(amount);
+    if (normalized === null) return 'Price unavailable';
+    try {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency
+      }).format(normalized);
+    } catch (error) {
+      return `$${normalized.toFixed(2)}`;
+    }
+  }
+
+  function getProductImage(product) {
+    if (product.media && product.media.length && product.media[0].url) {
+      return product.media[0].url;
+    }
+    if (product.image) return product.image;
+    return 'https://via.placeholder.com/80x80?text=Product';
+  }
+
+  function getProductUrl(product) {
+    return product.lookupUrl || product.variantUrl || product.url || '#';
+  }
+
+  function getMerchantName(product) {
+    if (product.shop?.name) return product.shop.name;
+    if (product.variants && product.variants.length && product.variants[0].shop?.name) {
+      return product.variants[0].shop.name;
+    }
+    return '';
   }
 
   // Escape HTML to prevent XSS
