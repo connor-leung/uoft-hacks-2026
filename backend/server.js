@@ -4,8 +4,19 @@ import multer from 'multer';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { analyzeImage } from './services/gemini.js';
+import { track } from './analytics/amplitude.js';
+import {
+  applyBoostsToResults,
+  getBoostScores,
+  logBoosts,
+  recordClick,
+  recordImpressions,
+} from './analytics/boost.js';
+import { connectMongo } from './db/mongo.js';
+import { Session } from './models/Session.js';
 
 dotenv.config();
 
@@ -77,18 +88,121 @@ app.post('/shop-frame', upload.single('frame'), async (req, res) => {
     });
   }
 
+  const userId = req.headers['x-anonymous-id'] || req.headers['x-user-id'] || 'anonymous';
+  const cacheCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const requestId = crypto.randomUUID();
+
+  track('frame_captured', userId, {
+    image_size_bytes: req.file.size,
+    mime_type: req.file.mimetype,
+  });
+
   try {
+    const boosts = await getBoostScores().catch((error) => {
+      console.error('[Boosts] Failed to load boosts:', error);
+      return { categoryBoosts: {}, queryBoosts: {}, boostsByKey: {} };
+    });
+    logBoosts(boosts);
+
+    const imageBuffer = await fs.promises.readFile(req.file.path);
+    const frameHash = crypto
+      .createHash('sha256')
+      .update(imageBuffer)
+      .digest('hex');
+    const cachedSession = await Session.findOne({
+      frameHash,
+      createdAt: { $gte: cacheCutoff },
+    }).sort({ createdAt: -1 });
+
+    if (cachedSession) {
+      console.log(`[Cache] hit for frameHash=${frameHash}`);
+      track('cache_hit', userId, { frameHash });
+
+      const boostedResult = applyBoostsToResults(
+        { frameItems: cachedSession.items || [], results: cachedSession.results || [] },
+        boosts
+      );
+
+      recordImpressions({
+        userId,
+        requestId,
+        frameItems: boostedResult.frameItems,
+        results: boostedResult.results,
+      }).catch((error) => {
+        console.error('[Boosts] Failed to record impressions:', error);
+      });
+
+      // Clean up uploaded file after processing
+      fs.unlink(req.file.path, (err) => {
+        if (err) console.error('Failed to delete temp file:', err);
+      });
+
+      return res.json({
+        frameItems: boostedResult.frameItems || [],
+        results: boostedResult.results || [],
+        sessionId: cachedSession.sessionId,
+        frameHash: cachedSession.frameHash,
+        requestId,
+        cached: true,
+      });
+    }
+
+    track('cache_miss', userId, { frameHash });
+
+    const sessionId = crypto.randomUUID();
     const result = await analyzeImage(req.file.path);
+    const timestampSec = Number(req.body?.timestampSec);
+    const sessionPayload = {
+      sessionId,
+      videoId: req.body?.videoId ? String(req.body.videoId) : undefined,
+      timestampSec: Number.isFinite(timestampSec) ? timestampSec : undefined,
+      frameHash,
+      items: result.frameItems || [],
+      results: result.results || [],
+    };
+
+    Session.create(sessionPayload).catch((error) => {
+      console.error('[MongoDB] Failed to store session:', error);
+    });
+
+    const boostedResult = applyBoostsToResults(result, boosts);
+
+    recordImpressions({
+      userId,
+      requestId,
+      frameItems: boostedResult.frameItems,
+      results: boostedResult.results,
+    }).catch((error) => {
+      console.error('[Boosts] Failed to record impressions:', error);
+    });
+
+    track('items_detected', userId, {
+      items_detected_count: result.frameItems?.length || 0,
+    });
+
+    track('catalog_results_shown', userId, {
+      results_count: result.results?.length || 0,
+    });
 
     // Clean up uploaded file after processing
     fs.unlink(req.file.path, (err) => {
       if (err) console.error('Failed to delete temp file:', err);
     });
 
-    res.json(result);
+    res.json({
+      ...boostedResult,
+      sessionId,
+      frameHash,
+      requestId,
+    });
   } catch (error) {
     // Clean up on error
     fs.unlink(req.file.path, () => {});
+
+    track('error_occurred', userId, {
+      error_message: error.message || 'Failed to analyze image',
+      error_stage: 'shop-frame',
+    });
 
     console.error('Gemini analysis error:', error);
     res.status(500).json({
@@ -96,6 +210,31 @@ app.post('/shop-frame', upload.single('frame'), async (req, res) => {
       error: 'Failed to analyze image'
     });
   }
+});
+
+// POST /track - accepts JSON for server-side tracking (e.g., product clicks)
+app.post('/track', (req, res) => {
+  const { eventName, userId, eventProps, userProps } = req.body || {};
+
+  if (!eventName) {
+    return res.status(400).json({ ok: false, error: 'eventName is required' });
+  }
+
+  if (eventName === 'product_clicked') {
+    recordClick({
+      userId,
+      requestId: eventProps?.requestId,
+      category: eventProps?.category,
+      query: eventProps?.query,
+      productId: eventProps?.productId,
+      productUrl: eventProps?.productUrl,
+    }).catch((error) => {
+      console.error('[Boosts] Failed to record click:', error);
+    });
+  }
+
+  track(eventName, userId, eventProps, userProps);
+  res.json({ ok: true });
 });
 
 // Error handling middleware
@@ -120,6 +259,13 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+connectMongo()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  })
+  .catch((error) => {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  });

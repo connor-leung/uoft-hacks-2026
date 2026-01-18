@@ -23,6 +23,8 @@ npm install
 Create `backend/.env`:
 ```bash
 GEMINI_API_KEY=your_gemini_api_key
+# MongoDB Atlas
+MONGODB_URI=mongodb+srv://<user>:<password>@cluster.mongodb.net/your_db
 # Optional: use real Shopify catalog search
 SHOPIFY_CLIENT_ID=your_shopify_client_id
 SHOPIFY_CLIENT_SECRET=your_shopify_client_secret
@@ -47,6 +49,46 @@ The extension calls `http://localhost:3000/shop-frame` and expects the backend t
 ## API
 - `POST /health` -> `{ ok: true }`
 - `POST /shop-frame` -> `multipart/form-data` with `image` field
+
+## MongoDB
+The backend stores sessions and events in MongoDB using Mongoose. Ensure `MONGODB_URI` is set.
+
+### Example documents
+Session
+```json
+{
+  "sessionId": "b25d9c6f-1ad6-4e50-9c90-4a9f1f2d7e1b",
+  "videoId": "dQw4w9WgXcQ",
+  "timestampSec": 123.45,
+  "frameHash": "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881",
+  "items": [
+    { "item": "black graphic tee", "confidence": 0.82 }
+  ],
+  "results": [
+    {
+      "item": { "query": "black graphic tee", "confidence": 0.8 },
+      "products": [
+        { "title": "Black Graphic Tee", "url": "https://shop.example/black-tee" }
+      ]
+    }
+  ],
+  "createdAt": "2024-11-19T12:34:56.789Z"
+}
+```
+
+Event
+```json
+{
+  "type": "product_click",
+  "sessionId": "b25d9c6f-1ad6-4e50-9c90-4a9f1f2d7e1b",
+  "itemQuery": "black graphic tee",
+  "itemCategory": "tops",
+  "productUrl": "https://shop.example/black-tee",
+  "productRank": 1,
+  "createdAt": "2024-11-19T12:35:01.123Z",
+  "latencyMs": 842
+}
+```
 
 ## Notes
 - Image upload limit is 10MB.
