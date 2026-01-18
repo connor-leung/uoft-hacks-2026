@@ -214,15 +214,19 @@ function dedupeAndRankProducts(products, seenUrls) {
   const scored = [];
 
   for (const product of products) {
-    if (!product || !product.url) continue;
-    if (seenUrls.has(product.url)) continue;
-    seenUrls.add(product.url);
+    if (!product) continue;
+    // Use url or generate a unique key from title+vendor for deduplication
+    const dedupeKey = product.url || `${product.title}-${product.vendor}`;
+    if (seenUrls.has(dedupeKey)) continue;
+    seenUrls.add(dedupeKey);
 
     scored.push({
       product,
       score: scoreProduct(product),
     });
   }
+
+  console.log(`[Gemini] Dedupe: ${products.length} input -> ${scored.length} output`);
 
   return scored
     .sort((a, b) => b.score - a.score)

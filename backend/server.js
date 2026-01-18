@@ -15,27 +15,25 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// CORS configuration for chrome-extension:// origins
+// CORS configuration - allow all origins for development
+// This is needed because:
+// 1. Content scripts run in the context of the web page (youtube.com)
+// 2. Background scripts run in chrome-extension:// context
+// 3. Errors can bypass the cors middleware, so we need permissive settings
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl)
-    if (!origin) return callback(null, true);
-
-    // Allow chrome-extension:// origins
-    if (origin.startsWith('chrome-extension://')) {
-      return callback(null, true);
-    }
-
-    // Allow localhost for development
-    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-      return callback(null, true);
-    }
-
-    callback(new Error('Not allowed by CORS'));
-  },
+  origin: true, // Allow all origins
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
 }));
+
+// Ensure CORS headers are set even on errors
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  next();
+});
 
 app.use(express.json());
 
@@ -70,8 +68,8 @@ app.post('/health', (req, res) => {
   res.json({ ok: true });
 });
 
-// POST /shop-frame - accepts multipart/form-data with "image" field
-app.post('/shop-frame', upload.single('image'), async (req, res) => {
+// POST /shop-frame - accepts multipart/form-data with "frame" field
+app.post('/shop-frame', upload.single('frame'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({
       success: false,
@@ -102,6 +100,13 @@ app.post('/shop-frame', upload.single('image'), async (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
+  // Ensure CORS headers are set on error responses
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  console.error('Server error:', err);
+
   if (err instanceof multer.MulterError) {
     return res.status(400).json({
       success: false,

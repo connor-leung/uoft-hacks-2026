@@ -16,17 +16,21 @@ export async function searchShopifyCatalog(query, limit = 5) {
     const products = await searchProducts(query, limit);
 
     // Transform to expected format
+    const transformed = products.map(p => ({
+      id: p.id,
+      title: p.title,
+      vendor: p.vendor,
+      price: p.min_price,
+      priceMax: p.max_price,
+      image: p.image_url,
+      url: p.product_url,
+    }));
+
+    console.log(`[Shopify] Transformed products sample:`, transformed[0]);
+
     return {
       query,
-      products: products.map(p => ({
-        id: p.id,
-        title: p.title,
-        vendor: p.vendor,
-        price: p.min_price,
-        priceMax: p.max_price,
-        image: p.image_url,
-        url: p.product_url,
-      })),
+      products: transformed,
     };
   } catch (error) {
     console.error(`[Shopify] API error, falling back to mock:`, error.message);

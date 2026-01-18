@@ -12,6 +12,7 @@
   let detectedItems = [];
   let selectedItemIndex = 0;
   let currentProducts = [];
+  let currentResults = [];
   let viewState = 'idle'; // idle, loading, results, error, empty
   let expandedSections = new Set();
 
@@ -157,7 +158,7 @@
     const chips = items.map((item, index) => `
       <button class="item-chip ${index === selectedIndex ? 'active' : ''}"
               data-index="${index}">
-        ${escapeHtml(item)}
+        ${escapeHtml(item.item || item)}
       </button>
     `).join('');
 
@@ -211,17 +212,27 @@
   }
 
   // Render products list with expandable sections
-  function renderProducts(products) {
-    if (!products || products.length === 0) {
+  function renderProducts(resultsOrProducts) {
+    if (!resultsOrProducts || resultsOrProducts.length === 0) {
       return renderEmptyState();
     }
 
-    const sections = buildProductSections(detectedItems, products);
+    let sections = [];
+    let totalCount = 0;
+
+    if (resultsOrProducts[0] && resultsOrProducts[0].products) {
+      sections = buildProductSectionsFromResults(resultsOrProducts);
+      totalCount = countProductsFromResults(resultsOrProducts);
+    } else {
+      sections = buildProductSections(detectedItems, resultsOrProducts);
+      totalCount = resultsOrProducts.length;
+    }
+
     const sectionMarkup = sections.map(section => renderProductSection(section)).join('');
 
     return `
       <div class="products-section">
-        <h3 class="section-title">${products.length} product${products.length !== 1 ? 's' : ''} found</h3>
+        <h3 class="section-title">${totalCount} product${totalCount !== 1 ? 's' : ''} found</h3>
         <div class="product-sections">
           ${sectionMarkup}
         </div>
@@ -282,7 +293,7 @@
 
       case 'results':
         html = renderItemChips(detectedItems, selectedItemIndex);
-        html += renderProducts(currentProducts);
+        html += renderProducts(currentResults.length ? currentResults : currentProducts);
         break;
 
       case 'error':
@@ -395,10 +406,7 @@
       // Show the panel with preview
       showPanel(frameBlob);
 
-      // Set to idle state initially
-      viewState = 'idle';
-      updateDynamicContent();
-      updateCTAButton();
+      await startAnalysis();
 
     } catch (error) {
       console.error('[Shop the Frame] Error:', error);
@@ -408,6 +416,10 @@
 
   // Handle CTA button click
   async function handleCTAClick() {
+    await startAnalysis();
+  }
+
+  async function startAnalysis() {
     if (viewState === 'loading') return;
 
     if (!currentFrameBlob) {
@@ -579,7 +591,8 @@
     const matchedIndexes = new Set();
 
     items.forEach((item, index) => {
-      const normalizedItem = item.toLowerCase();
+      const label = item.item || item;
+      const normalizedItem = String(label).toLowerCase();
       const matched = [];
 
       products.forEach((product, productIndex) => {
@@ -595,7 +608,7 @@
 
       sections.push({
         id: `section-${index}`,
-        title: item,
+        title: label,
         products: matched
       });
     });
@@ -610,6 +623,27 @@
     }
 
     return sections;
+  }
+
+  function buildProductSectionsFromResults(results) {
+    return results.map((group, index) => {
+      const label = group.item?.query || `Item ${index + 1}`;
+      const products = Array.isArray(group.products) ? group.products : [];
+      return {
+        id: `section-${index}`,
+        title: label,
+        products
+      };
+    });
+  }
+
+  function countProductsFromResults(results) {
+    return results.reduce((total, group) => {
+      if (Array.isArray(group.products)) {
+        return total + group.products.length;
+      }
+      return total;
+    }, 0);
   }
 
   // Render a single expandable section
@@ -672,22 +706,21 @@
   // Send frame to backend
   async function sendToBackend(frameBlob) {
     try {
-      const formData = new FormData();
-      formData.append('frame', frameBlob, 'frame.jpg');
+      const data = await sendToBackground(frameBlob);
 
-      const response = await fetch(API_ENDPOINT, {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!response.ok) {
-        throw new Error(`Server error: ${response.status}`);
-      }
-
-      const data = await response.json();
+      console.log('[Shop the Frame] Received data:', JSON.stringify(data).slice(0, 500));
+      console.log('[Shop the Frame] data.results:', data?.results?.length, 'items');
 
       // Process response
-      if (data.detectedItems) {
+      currentResults = Array.isArray(data.results) ? data.results : [];
+
+      if (currentResults.length) {
+        detectedItems = currentResults.map((group, index) => ({
+          item: group.item?.query || group.item?.item || `Item ${index + 1}`
+        }));
+      } else if (Array.isArray(data.frameItems)) {
+        detectedItems = data.frameItems;
+      } else if (Array.isArray(data.detectedItems)) {
         detectedItems = data.detectedItems;
       } else {
         // Generate detected items from products if not provided
@@ -696,13 +729,19 @@
 
       currentProducts = data.products || [];
       selectedItemIndex = 0;
-      const sections = buildProductSections(detectedItems, currentProducts);
+      const sections = currentResults.length
+        ? buildProductSectionsFromResults(currentResults)
+        : buildProductSections(detectedItems, currentProducts);
       expandedSections = new Set();
       if (sections[0]) {
         expandedSections.add(sections[0].id);
       }
 
-      if (currentProducts.length === 0) {
+      const totalCount = currentResults.length
+        ? countProductsFromResults(currentResults)
+        : currentProducts.length;
+
+      if (totalCount === 0) {
         viewState = 'empty';
       } else {
         viewState = 'results';
@@ -724,6 +763,35 @@
         updateDynamicContent();
       }
     }
+  }
+
+  function sendToBackground(frameBlob) {
+    if (!chrome?.runtime?.sendMessage) {
+      return Promise.reject(new Error('Extension runtime unavailable. Reload the extension.'));
+    }
+
+    return new Promise((resolve, reject) => {
+      frameBlob.arrayBuffer()
+        .then((buffer) => {
+          chrome.runtime.sendMessage({
+            type: 'shopFrame',
+            image: buffer,
+            filename: 'frame.jpg',
+            mimeType: frameBlob.type || 'image/jpeg'
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
+            }
+            if (!response || !response.ok) {
+              reject(new Error(response?.error || 'Request failed'));
+              return;
+            }
+            resolve(response.data);
+          });
+        })
+        .catch(reject);
+    });
   }
 
   // Extract item categories from products
@@ -749,6 +817,7 @@
       "Headphones"
     ];
 
+    currentResults = [];
     currentProducts = [
       {
         title: 'Premium Black Hoodie - Unisex Cotton Blend',
