@@ -185,7 +185,7 @@
           <div class="product-image">
             <img src="${escapeHtml(imageUrl)}"
                  alt="${escapeHtml(product.title || 'Product image')}"
-                 onerror="this.src='https://via.placeholder.com/80x80?text=Product'"/>
+                 onerror="this.onerror=null;this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%2280%22 viewBox=%220 0 80 80%22%3E%3Crect fill=%22%23374151%22 width=%2280%22 height=%2280%22/%3E%3Ctext x=%2240%22 y=%2244%22 font-family=%22sans-serif%22 font-size=%2210%22 fill=%22%239CA3AF%22 text-anchor=%22middle%22%3ENo image%3C/text%3E%3C/svg%3E'"/>
           </div>
           <div class="product-info">
             <h4 class="product-title">${escapeHtml(product.title || 'Untitled product')}</h4>
@@ -554,7 +554,7 @@
       return product.media[0].url;
     }
     if (product.image) return product.image;
-    return 'https://via.placeholder.com/80x80?text=Product';
+    return 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%2280%22 viewBox=%220 0 80 80%22%3E%3Crect fill=%22%23374151%22 width=%2280%22 height=%2280%22/%3E%3Ctext x=%2240%22 y=%2244%22 font-family=%22sans-serif%22 font-size=%2210%22 fill=%22%239CA3AF%22 text-anchor=%22middle%22%3ENo image%3C/text%3E%3C/svg%3E';
   }
 
   function getProductUrl(product) {
@@ -579,11 +579,14 @@
 
   // Build section data for rendering
   function buildProductSections(items, products) {
+    // Filter out products without valid URLs first
+    const validProducts = filterValidProducts(products);
+
     if (!items || items.length === 0) {
       return [{
         id: 'section-all',
         title: 'All products',
-        products
+        products: validProducts
       }];
     }
 
@@ -595,7 +598,7 @@
       const normalizedItem = String(label).toLowerCase();
       const matched = [];
 
-      products.forEach((product, productIndex) => {
+      validProducts.forEach((product, productIndex) => {
         const category = (product.category || '').toLowerCase();
         const title = (product.title || '').toLowerCase();
         const isMatch = category === normalizedItem || title.includes(normalizedItem);
@@ -613,7 +616,7 @@
       });
     });
 
-    const unmatched = products.filter((_, index) => !matchedIndexes.has(index));
+    const unmatched = validProducts.filter((_, index) => !matchedIndexes.has(index));
     if (unmatched.length) {
       sections.push({
         id: 'section-more',
@@ -625,10 +628,16 @@
     return sections;
   }
 
+  // Filter out products without a valid URL
+  function filterValidProducts(products) {
+    if (!Array.isArray(products)) return [];
+    return products.filter(p => p && p.url && typeof p.url === 'string' && p.url.trim() !== '');
+  }
+
   function buildProductSectionsFromResults(results) {
     return results.map((group, index) => {
       const label = group.item?.query || `Item ${index + 1}`;
-      const products = Array.isArray(group.products) ? group.products : [];
+      const products = filterValidProducts(group.products);
       return {
         id: `section-${index}`,
         title: label,
@@ -639,10 +648,8 @@
 
   function countProductsFromResults(results) {
     return results.reduce((total, group) => {
-      if (Array.isArray(group.products)) {
-        return total + group.products.length;
-      }
-      return total;
+      const validProducts = filterValidProducts(group.products);
+      return total + validProducts.length;
     }, 0);
   }
 
