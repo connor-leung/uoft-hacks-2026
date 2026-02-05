@@ -1,5 +1,7 @@
 # Shop the Frame (UofT Hacks)
 
+[![demo video](https://img.youtube.com/vi/0ceemUPquRQ/0.jpg)](https://www.youtube.com/watch?v=0ceemUPquRQ)
+
 Shop the Frame is a Chrome extension + Express backend that lets you capture a YouTube video frame, detect items in the scene with Gemini, and return Shopify product matches.
 
 ## Features
