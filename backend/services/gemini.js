@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import { searchShopifyCatalog } from './shopify.js';
+import { normalizeProductSource, searchCatalog } from './shopify.js';
 
 dotenv.config();
 
@@ -18,8 +18,8 @@ const MIME_TYPES = {
 
 // Function declaration for Gemini function calling
 const SEARCH_TOOL = {
-  name: 'searchShopifyCatalog',
-  description: 'Search the Shopify product catalog for purchasable items. Call this function for each distinct product you identify in the image. Make 5-8 calls total for different items.',
+  name: 'searchCatalog',
+  description: 'Search the selected product catalog for purchasable items. Call this function for each distinct product you identify in the image. Make 5-8 calls total for different items.',
   parameters: {
     type: 'object',
     properties: {
@@ -63,7 +63,7 @@ const AGENT_PROMPT = `You are a shopping assistant that helps users find and pur
 
 Analyze this video screenshot carefully. Your task is to:
 1. Identify 5-8 distinct purchasable items visible in the image
-2. For EACH item, call the searchShopifyCatalog function with a detailed search query
+2. For EACH item, call the searchCatalog function with a detailed search query
 
 RULES FOR IDENTIFYING ITEMS:
 - Only identify physical products that can be purchased
@@ -80,7 +80,8 @@ RULES FOR SEARCH QUERIES:
 
 Make exactly 5-8 function calls, one for each distinct item you identify.`;
 
-export async function analyzeImageWithFunctionCalling(imagePath) {
+export async function analyzeImageWithFunctionCalling(imagePath, options = {}) {
+  const productSource = normalizeProductSource(options.productSource);
   const frameItems = await extractFrameItems(imagePath);
 
   console.log(`[Gemini] Extracted ${frameItems.length} frame items`);
@@ -118,7 +119,7 @@ export async function analyzeImageWithFunctionCalling(imagePath) {
     functionCalls.slice(0, 8).map(async (call) => {
       const { query, limit = 3 } = call.args;
       try {
-        return await searchShopifyCatalog(query, limit);
+        return await searchCatalog(query, limit, productSource);
       } catch (error) {
         console.error(`[Gemini] Search failed for "${query}":`, error.message);
         return { query, products: [] };
@@ -262,6 +263,6 @@ function toConfidence(value) {
 }
 
 // Keep the old function for backwards compatibility
-export async function analyzeImage(imagePath) {
-  return analyzeImageWithFunctionCalling(imagePath);
+export async function analyzeImage(imagePath, options = {}) {
+  return analyzeImageWithFunctionCalling(imagePath, options);
 }

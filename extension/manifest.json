@@ -3,11 +3,15 @@
   "name": "Shop This Frame",
   "version": "1.0.0",
   "description": "Shop items from YouTube video frames",
-  "permissions": [],
+  "permissions": ["storage"],
   "host_permissions": [
     "https://www.youtube.com/*",
     "http://localhost:3000/*"
   ],
+  "action": {
+    "default_title": "Shop This Frame Settings",
+    "default_popup": "popup.html"
+  },
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/watch*"],

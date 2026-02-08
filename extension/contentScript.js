@@ -3,6 +3,10 @@
   'use strict';
 
   const API_ENDPOINT = 'http://localhost:3000/shop-frame';
+  const STORAGE_KEYS = {
+    enabled: 'stfEnabled',
+    productSource: 'stfProductSource',
+  };
 
   // State
   let panel = null;
@@ -17,6 +21,10 @@
   let sidebarObserver = null;
   let watchedVideo = null;
   let lastAutoScanTime = null;
+  let extensionSettings = {
+    enabled: true,
+    productSource: 'shopify',
+  };
 
   // ============================================
   // SVG Icons
@@ -55,7 +63,14 @@
   // ============================================
   // Initialize Extension
   // ============================================
-  function init() {
+  async function init() {
+    extensionSettings = await getExtensionSettings();
+
+    if (!extensionSettings.enabled) {
+      teardown();
+      return;
+    }
+
     const existingButton = document.getElementById('shop-frame-btn');
     if (existingButton) {
       existingButton.remove();
@@ -73,6 +88,25 @@
     attachPauseTrigger();
 
     console.log('[Shop the Frame] Extension initialized');
+  }
+
+  function teardown() {
+    if (watchedVideo) {
+      watchedVideo.removeEventListener('pause', handleVideoPause);
+      watchedVideo = null;
+    }
+
+    if (sidebarObserver) {
+      sidebarObserver.disconnect();
+      sidebarObserver = null;
+    }
+
+    const existingPanel = document.getElementById('shop-frame-panel');
+    if (existingPanel) {
+      existingPanel.remove();
+    }
+
+    panel = null;
   }
 
   function findSidebarContainer() {
@@ -121,6 +155,8 @@
   }
 
   function attachPauseTrigger(retries = 10) {
+    if (!extensionSettings.enabled) return;
+
     const video = document.querySelector('video');
 
     if (!video) {
@@ -141,6 +177,8 @@
   }
 
   async function handleVideoPause() {
+    if (!extensionSettings.enabled) return;
+
     const video = watchedVideo || document.querySelector('video');
     if (!video) return;
 
@@ -245,6 +283,7 @@
     const imageUrl = getProductImage(product);
     const productUrl = getProductUrl(product);
     const merchantName = getMerchantName(product);
+    const sourceLabel = getMarketplaceLabel(product);
 
     return `
       <div class="product-card" data-url="${escapeHtml(productUrl)}">
@@ -261,14 +300,14 @@
                 <div class="shopify-badge-icon">
                   ${icons.shopifyBolt}
                 </div>
-                <span>Shopify</span>
+                <span>${escapeHtml(sourceLabel)}</span>
               </div>
               ${merchantName ? `<div class="merchant-name">${icons.storefront}<span>${escapeHtml(merchantName)}</span></div>` : ''}
             </div>
             <div class="product-footer">
               <span class="product-price">${priceDisplay}</span>
               <button class="view-btn">
-                View on Shopify
+                View on ${escapeHtml(sourceLabel)}
                 ${icons.externalLink}
               </button>
             </div>
@@ -321,12 +360,16 @@
 
   // Render empty state
   function renderEmptyState() {
+    const sourceLabel = extensionSettings.productSource === 'all'
+      ? 'our supported stores'
+      : `${getSourceLabel(extensionSettings.productSource)} sellers`;
+
     return `
       <div class="empty-state">
         <div class="empty-state-icon">
           ${icons.shoppingBag}
         </div>
-        <p>We're looking for products sold by Shopify merchants…</p>
+        <p>We're looking for products sold by ${escapeHtml(sourceLabel)}…</p>
       </div>
     `;
   }
@@ -494,6 +537,7 @@
 
   async function startAnalysis() {
     if (viewState === 'loading') return;
+    if (!extensionSettings.enabled) return;
 
     if (!currentFrameBlob) {
       console.error('[Shop the Frame] No frame captured');
@@ -645,6 +689,16 @@
       return product.variants[0].shop.name;
     }
     return '';
+  }
+
+  function getMarketplaceLabel(product) {
+    return getSourceLabel(product?.marketplace || product?.source || extensionSettings.productSource);
+  }
+
+  function getSourceLabel(source) {
+    if (source === 'amazon') return 'Amazon';
+    if (source === 'all') return 'Stores';
+    return 'Shopify';
   }
 
   // Escape HTML to prevent XSS
@@ -879,7 +933,8 @@
           type: 'shopFrame',
           imageBase64: base64,
           filename: 'frame.jpg',
-          mimeType: frameBlob.type || 'image/jpeg'
+          mimeType: frameBlob.type || 'image/jpeg',
+          productSource: extensionSettings.productSource,
         }, (response) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
@@ -927,28 +982,32 @@
         priceMin: 39,
         priceMax: 59,
         image: 'https://images.unsplash.com/photo-1556821840-3a63f95609a7?w=400&h=400&fit=crop',
-        url: '#'
+        url: '#',
+        marketplace: extensionSettings.productSource === 'all' ? 'shopify' : extensionSettings.productSource,
       },
       {
         title: 'Classic Black Pullover Hoodie',
         priceMin: 45,
         priceMax: 65,
         image: 'https://images.unsplash.com/photo-1620799140408-edc6dcb6d633?w=400&h=400&fit=crop',
-        url: '#'
+        url: '#',
+        marketplace: extensionSettings.productSource === 'all' ? 'shopify' : extensionSettings.productSource,
       },
       {
         title: 'Oversized Black Hoodie - Streetwear Style',
         priceMin: 52,
         priceMax: 78,
         image: 'https://images.unsplash.com/photo-1578587018452-892bacefd3f2?w=400&h=400&fit=crop',
-        url: '#'
+        url: '#',
+        marketplace: extensionSettings.productSource === 'all' ? 'shopify' : extensionSettings.productSource,
       },
       {
         title: 'Minimal Black Hoodie with Pocket',
         priceMin: 38,
         priceMax: 55,
         image: 'https://images.unsplash.com/photo-1556821840-3a63f95609a7?w=400&h=400&fit=crop',
-        url: '#'
+        url: '#',
+        marketplace: extensionSettings.productSource === 'all' ? 'shopify' : extensionSettings.productSource,
       }
     ];
 
@@ -964,12 +1023,49 @@
   // ============================================
   // Initialization
   // ============================================
+  async function getExtensionSettings() {
+    if (!chrome?.storage?.local) {
+      return { enabled: true, productSource: 'shopify' };
+    }
+
+    const values = await chrome.storage.local.get({
+      [STORAGE_KEYS.enabled]: true,
+      [STORAGE_KEYS.productSource]: 'shopify',
+    });
+
+    return {
+      enabled: values[STORAGE_KEYS.enabled] !== false,
+      productSource: normalizeProductSource(values[STORAGE_KEYS.productSource]),
+    };
+  }
+
+  function normalizeProductSource(source) {
+    if (source === 'amazon' || source === 'all') return source;
+    return 'shopify';
+  }
+
+  if (chrome?.storage?.onChanged) {
+    chrome.storage.onChanged.addListener(async (changes, area) => {
+      if (area !== 'local') return;
+      if (!changes[STORAGE_KEYS.enabled] && !changes[STORAGE_KEYS.productSource]) return;
+
+      extensionSettings = await getExtensionSettings();
+      if (!extensionSettings.enabled) {
+        teardown();
+        return;
+      }
+
+      await init();
+    });
+  }
 
   // Wait for page to be ready, then initialize
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', () => {
+      init().catch((error) => console.error('[Shop the Frame] Init failed:', error));
+    });
   } else {
-    init();
+    init().catch((error) => console.error('[Shop the Frame] Init failed:', error));
   }
 
   // Re-initialize on YouTube SPA navigation
@@ -980,7 +1076,7 @@
       if (location.href.includes('youtube.com/watch')) {
         watchedVideo = null;
         lastAutoScanTime = null;
-        setTimeout(init, 1000);
+        setTimeout(() => init().catch((error) => console.error('[Shop the Frame] Init failed:', error)), 1000);
         setTimeout(() => mountPanelInSidebar(), 1200);
         setTimeout(() => attachPauseTrigger(), 1200);
       }
