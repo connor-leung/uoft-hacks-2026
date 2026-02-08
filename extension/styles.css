@@ -20,6 +20,37 @@
   --amber-900: #78350f;
 }
 
+/* Theme mapping: YouTube dark mode (and system dark fallback) */
+html[dark] {
+  --white: #1f1f1f;
+  --gray-50: #252525;
+  --gray-100: #2b2b2b;
+  --gray-200: #383838;
+  --gray-300: #454545;
+  --gray-400: #8f8f8f;
+  --gray-500: #a8a8a8;
+  --gray-600: #b8b8b8;
+  --gray-700: #cdcdcd;
+  --gray-800: #e3e3e3;
+  --gray-900: #f1f1f1;
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([dark]) {
+    --white: #1f1f1f;
+    --gray-50: #252525;
+    --gray-100: #2b2b2b;
+    --gray-200: #383838;
+    --gray-300: #454545;
+    --gray-400: #8f8f8f;
+    --gray-500: #a8a8a8;
+    --gray-600: #b8b8b8;
+    --gray-700: #cdcdcd;
+    --gray-800: #e3e3e3;
+    --gray-900: #f1f1f1;
+  }
+}
+
 /* Side Panel */
 #shop-frame-panel {
   display: none;
