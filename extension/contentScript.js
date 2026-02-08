@@ -373,6 +373,8 @@
         break;
     }
 
+    const isCompactState = viewState === 'empty' || viewState === 'idle';
+    panel.classList.toggle('compact', isCompactState);
     container.innerHTML = html;
 
     // Attach event listeners
@@ -729,6 +731,10 @@
     }, 0);
   }
 
+  function expandAllSections(sections) {
+    expandedSections = new Set(sections.map(section => section.id));
+  }
+
   // Render a single expandable section
   function renderProductSection(section) {
     const isExpanded = expandedSections.has(section.id);
@@ -823,10 +829,7 @@
       const sections = currentResults.length
         ? buildProductSectionsFromResults(currentResults)
         : buildProductSections(detectedItems, currentProducts);
-      expandedSections = new Set();
-      if (sections[0]) {
-        expandedSections.add(sections[0].id);
-      }
+      expandAllSections(sections);
 
       const totalCount = currentResults.length
         ? countProductsFromResults(currentResults)
@@ -951,10 +954,7 @@
 
     selectedItemIndex = 0;
     const sections = buildProductSections(detectedItems, currentProducts);
-    expandedSections = new Set();
-    if (sections[0]) {
-      expandedSections.add(sections[0].id);
-    }
+    expandAllSections(sections);
     viewState = 'results';
 
     updateCTAButton();
