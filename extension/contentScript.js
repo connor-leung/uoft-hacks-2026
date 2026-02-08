@@ -15,6 +15,7 @@
   let currentResults = [];
   let viewState = 'idle'; // idle, loading, results, error, empty
   let expandedSections = new Set();
+  let sidebarObserver = null;
 
   // ============================================
   // SVG Icons
@@ -54,12 +55,68 @@
   // Initialize Extension
   // ============================================
   function init() {
-    if (document.getElementById('shop-frame-btn')) return;
+    if (!button || !document.getElementById('shop-frame-btn')) {
+      createButton();
+    } else {
+      button = document.getElementById('shop-frame-btn');
+    }
 
-    createButton();
-    createPanel();
+    if (!panel || !document.getElementById('shop-frame-panel')) {
+      createPanel();
+      updateDynamicContent();
+    } else {
+      panel = document.getElementById('shop-frame-panel');
+    }
+
+    mountPanelInSidebar();
+    panel.classList.add('open');
 
     console.log('[Shop the Frame] Extension initialized');
+  }
+
+  function findSidebarContainer() {
+    return document.querySelector('ytd-watch-next-secondary-results-renderer #secondary-inner')
+      || document.querySelector('#secondary #secondary-inner')
+      || document.querySelector('#secondary');
+  }
+
+  function mountPanelInSidebar(retries = 12) {
+    if (!location.href.includes('youtube.com/watch')) return;
+    if (!panel) return;
+
+    const sidebar = findSidebarContainer();
+    if (!sidebar) {
+      if (retries > 0) {
+        setTimeout(() => mountPanelInSidebar(retries - 1), 350);
+      }
+      return;
+    }
+
+    if (panel.parentElement !== sidebar) {
+      const chipRow = sidebar.querySelector('ytd-feed-filter-chip-bar-renderer, #chips-wrapper');
+      if (chipRow) {
+        sidebar.insertBefore(panel, chipRow);
+      } else {
+        sidebar.prepend(panel);
+      }
+    }
+
+    ensureSidebarObserver(sidebar);
+  }
+
+  function ensureSidebarObserver(sidebar) {
+    if (!sidebar) return;
+    if (sidebarObserver) {
+      sidebarObserver.disconnect();
+    }
+
+    sidebarObserver = new MutationObserver(() => {
+      if (!document.getElementById('shop-frame-panel')) {
+        mountPanelInSidebar(0);
+      }
+    });
+
+    sidebarObserver.observe(sidebar, { childList: true });
   }
 
   // ============================================
@@ -436,8 +493,13 @@
     updateDynamicContent();
     requestAnimationFrame(() => {
       const sectionEl = panel.querySelector(`.product-section[data-section="${sectionId}"]`);
-      if (sectionEl) {
-        sectionEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const scrollContainer = panel.querySelector('.panel-content');
+      if (sectionEl && scrollContainer) {
+        const targetTop = sectionEl.offsetTop - 8;
+        scrollContainer.scrollTo({
+          top: Math.max(targetTop, 0),
+          behavior: 'smooth'
+        });
       }
     });
   }
@@ -674,6 +736,8 @@
 
   // Show the side panel
   function showPanel() {
+    mountPanelInSidebar();
+
     // Attach CTA event listener
     const ctaBtn = panel.querySelector('#shop-cta-btn');
     if (ctaBtn) {
@@ -895,6 +959,7 @@
       lastUrl = location.href;
       if (location.href.includes('youtube.com/watch')) {
         setTimeout(init, 1000);
+        setTimeout(() => mountPanelInSidebar(), 1200);
       }
     }
   }).observe(document.body, { subtree: true, childList: true });
