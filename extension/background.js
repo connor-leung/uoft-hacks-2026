@@ -26,6 +26,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function handleShopFrame(message) {
+  const productSource = normalizeProductSource(message.productSource);
+
   // Convert base64 back to blob
   const binaryString = atob(message.imageBase64);
   const bytes = new Uint8Array(binaryString.length);
@@ -36,6 +38,7 @@ async function handleShopFrame(message) {
   
   const formData = new FormData();
   formData.append('frame', blob, message.filename || 'frame.jpg');
+  formData.append('productSource', productSource);
 
   console.log('[Background] Sending request to backend...');
 
@@ -53,4 +56,9 @@ async function handleShopFrame(message) {
   const data = await response.json();
   console.log('[Background] Received response:', JSON.stringify(data).slice(0, 500));
   return data;
+}
+
+function normalizeProductSource(source) {
+  if (source === 'amazon' || source === 'all') return source;
+  return 'shopify';
 }

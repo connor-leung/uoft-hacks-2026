@@ -150,7 +150,9 @@ app.post('/shop-frame', upload.single('frame'), async (req, res) => {
     track('cache_miss', userId, { frameHash });
 
     const sessionId = crypto.randomUUID();
-    const result = await analyzeImage(req.file.path);
+    const result = await analyzeImage(req.file.path, {
+      productSource: req.body?.productSource,
+    });
     const timestampSec = Number(req.body?.timestampSec);
     const sessionPayload = {
       sessionId,

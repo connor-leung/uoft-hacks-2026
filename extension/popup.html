@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shop This Frame</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <h1 class="title-row">
+        <img src="icons/icon16.png" alt="" class="title-icon" />
+        <span>Shop This Frame</span>
+      </h1>
+
+      <label class="field toggle-row">
+        <span>Extension</span>
+        <span class="switch">
+          <input id="enabled-toggle" type="checkbox" />
+          <span class="slider" aria-hidden="true"></span>
+        </span>
+      </label>
+
+      <label class="field">
+        <span>Product source</span>
+        <select id="product-source">
+          <option value="shopify">Shopify</option>
+          <option value="amazon">Amazon</option>
+          <option value="all">All sources</option>
+        </select>
+      </label>
+
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
