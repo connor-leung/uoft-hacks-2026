@@ -6,7 +6,6 @@
 
   // State
   let panel = null;
-  let button = null;
   let currentFrameBlob = null;
   let currentTimestamp = '00:00';
   let detectedItems = [];
@@ -15,6 +14,9 @@
   let currentResults = [];
   let viewState = 'idle'; // idle, loading, results, error, empty
   let expandedSections = new Set();
+  let sidebarObserver = null;
+  let watchedVideo = null;
+  let lastAutoScanTime = null;
 
   // ============================================
   // SVG Icons
@@ -54,23 +56,101 @@
   // Initialize Extension
   // ============================================
   function init() {
-    if (document.getElementById('shop-frame-btn')) return;
+    const existingButton = document.getElementById('shop-frame-btn');
+    if (existingButton) {
+      existingButton.remove();
+    }
 
-    createButton();
-    createPanel();
+    if (!panel || !document.getElementById('shop-frame-panel')) {
+      createPanel();
+      updateDynamicContent();
+    } else {
+      panel = document.getElementById('shop-frame-panel');
+    }
+
+    mountPanelInSidebar();
+    panel.classList.add('open');
+    attachPauseTrigger();
 
     console.log('[Shop the Frame] Extension initialized');
   }
 
-  // ============================================
-  // Create Floating Button
-  // ============================================
-  function createButton() {
-    button = document.createElement('button');
-    button.id = 'shop-frame-btn';
-    button.innerHTML = `${icons.shoppingBag} Shop this frame`;
-    button.addEventListener('click', handleShopClick);
-    document.body.appendChild(button);
+  function findSidebarContainer() {
+    return document.querySelector('ytd-watch-next-secondary-results-renderer #secondary-inner')
+      || document.querySelector('#secondary #secondary-inner')
+      || document.querySelector('#secondary');
+  }
+
+  function mountPanelInSidebar(retries = 12) {
+    if (!location.href.includes('youtube.com/watch')) return;
+    if (!panel) return;
+
+    const sidebar = findSidebarContainer();
+    if (!sidebar) {
+      if (retries > 0) {
+        setTimeout(() => mountPanelInSidebar(retries - 1), 350);
+      }
+      return;
+    }
+
+    if (panel.parentElement !== sidebar) {
+      const chipRow = sidebar.querySelector('ytd-feed-filter-chip-bar-renderer, #chips-wrapper');
+      if (chipRow) {
+        sidebar.insertBefore(panel, chipRow);
+      } else {
+        sidebar.prepend(panel);
+      }
+    }
+
+    ensureSidebarObserver(sidebar);
+  }
+
+  function ensureSidebarObserver(sidebar) {
+    if (!sidebar) return;
+    if (sidebarObserver) {
+      sidebarObserver.disconnect();
+    }
+
+    sidebarObserver = new MutationObserver(() => {
+      if (!document.getElementById('shop-frame-panel')) {
+        mountPanelInSidebar(0);
+      }
+    });
+
+    sidebarObserver.observe(sidebar, { childList: true });
+  }
+
+  function attachPauseTrigger(retries = 10) {
+    const video = document.querySelector('video');
+
+    if (!video) {
+      if (retries > 0) {
+        setTimeout(() => attachPauseTrigger(retries - 1), 400);
+      }
+      return;
+    }
+
+    if (watchedVideo && watchedVideo !== video) {
+      watchedVideo.removeEventListener('pause', handleVideoPause);
+    }
+
+    if (watchedVideo !== video) {
+      watchedVideo = video;
+      watchedVideo.addEventListener('pause', handleVideoPause);
+    }
+  }
+
+  async function handleVideoPause() {
+    const video = watchedVideo || document.querySelector('video');
+    if (!video) return;
+
+    const roundedTime = Number(video.currentTime.toFixed(2));
+    if (lastAutoScanTime !== null && Math.abs(lastAutoScanTime - roundedTime) < 0.2) {
+      return;
+    }
+
+    lastAutoScanTime = roundedTime;
+    await scanVideoFrame(video);
   }
 
   // ============================================
@@ -98,24 +178,12 @@
             ${icons.shoppingBag}
             <h2>Shop the Frame</h2>
           </div>
-          <p class="panel-header-subtitle">Powered by Gemini + Shopify</p>
         </div>
         <button class="close-btn" aria-label="Close panel">
           ${icons.close}
         </button>
       </div>
       <div class="panel-content">
-        <div class="frame-preview">
-          <div class="frame-preview-container">
-            <img id="frame-thumbnail" src="" alt="Captured frame"/>
-            <div class="frame-timestamp" id="frame-timestamp">Frame at 00:00</div>
-          </div>
-        </div>
-        <div class="cta-section">
-          <button class="shop-frame-cta" id="shop-cta-btn">
-            Shop this frame
-          </button>
-        </div>
         <div id="dynamic-content"></div>
       </div>
     `;
@@ -164,7 +232,6 @@
 
     return `
       <div class="detected-items-section">
-        <h3 class="section-title">Detected items</h3>
         <div class="item-chips-container">
           ${chips}
         </div>
@@ -306,6 +373,8 @@
         break;
     }
 
+    const isCompactState = viewState === 'empty' || viewState === 'idle';
+    panel.classList.toggle('compact', isCompactState);
     container.innerHTML = html;
 
     // Attach event listeners
@@ -397,21 +466,21 @@
       return;
     }
 
-    try {
-      if (!video.paused) {
-        video.pause();
-      }
+    if (!video.paused) {
+      video.pause();
+      return;
+    }
 
-      // Capture the frame
+    await scanVideoFrame(video);
+  }
+
+  async function scanVideoFrame(video) {
+    try {
       const frameBlob = await captureFrame(video);
       currentFrameBlob = frameBlob;
       currentTimestamp = formatVideoTime(video.currentTime);
-
-      // Show the panel with preview
-      showPanel(frameBlob);
-
+      showPanel();
       await startAnalysis();
-
     } catch (error) {
       console.error('[Shop the Frame] Error:', error);
       alert('Failed to capture frame: ' + error.message);
@@ -446,8 +515,13 @@
     updateDynamicContent();
     requestAnimationFrame(() => {
       const sectionEl = panel.querySelector(`.product-section[data-section="${sectionId}"]`);
-      if (sectionEl) {
-        sectionEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const scrollContainer = panel.querySelector('.panel-content');
+      if (sectionEl && scrollContainer) {
+        const targetTop = sectionEl.offsetTop - 8;
+        scrollContainer.scrollTo({
+          top: Math.max(targetTop, 0),
+          behavior: 'smooth'
+        });
       }
     });
   }
@@ -657,6 +731,10 @@
     }, 0);
   }
 
+  function expandAllSections(sections) {
+    expandedSections = new Set(sections.map(section => section.id));
+  }
+
   // Render a single expandable section
   function renderProductSection(section) {
     const isExpanded = expandedSections.has(section.id);
@@ -683,16 +761,8 @@
   }
 
   // Show the side panel
-  function showPanel(frameBlob) {
-    const thumbnail = panel.querySelector('#frame-thumbnail');
-    const timestampEl = panel.querySelector('#frame-timestamp');
-
-    if (thumbnail) {
-      thumbnail.src = URL.createObjectURL(frameBlob);
-    }
-    if (timestampEl) {
-      timestampEl.textContent = `Frame at ${currentTimestamp}`;
-    }
+  function showPanel() {
+    mountPanelInSidebar();
 
     // Attach CTA event listener
     const ctaBtn = panel.querySelector('#shop-cta-btn');
@@ -759,10 +829,7 @@
       const sections = currentResults.length
         ? buildProductSectionsFromResults(currentResults)
         : buildProductSections(detectedItems, currentProducts);
-      expandedSections = new Set();
-      if (sections[0]) {
-        expandedSections.add(sections[0].id);
-      }
+      expandAllSections(sections);
 
       const totalCount = currentResults.length
         ? countProductsFromResults(currentResults)
@@ -887,10 +954,7 @@
 
     selectedItemIndex = 0;
     const sections = buildProductSections(detectedItems, currentProducts);
-    expandedSections = new Set();
-    if (sections[0]) {
-      expandedSections.add(sections[0].id);
-    }
+    expandAllSections(sections);
     viewState = 'results';
 
     updateCTAButton();
@@ -914,7 +978,11 @@
     if (location.href !== lastUrl) {
       lastUrl = location.href;
       if (location.href.includes('youtube.com/watch')) {
+        watchedVideo = null;
+        lastAutoScanTime = null;
         setTimeout(init, 1000);
+        setTimeout(() => mountPanelInSidebar(), 1200);
+        setTimeout(() => attachPauseTrigger(), 1200);
       }
     }
   }).observe(document.body, { subtree: true, childList: true });
